@@ -1,0 +1,5 @@
+saved/
+wandb/
+__pycache__/
+models/weights/*.pt
+models/weights/*.pth
