@@ -1,4 +1,4 @@
-name: imb
+name: iob
 channels:
   - defaults
   - https://repo.anaconda.com/pkgs/main

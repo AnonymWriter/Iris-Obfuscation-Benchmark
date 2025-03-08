@@ -68,53 +68,35 @@ def crop_image(image: torch.Tensor, return_idx: bool = False) -> torch.Tensor | 
     else:
         cropped = image[:, x_min: x_max + 1, y_min: y_max + 1]
         return cropped
-    
-def mask_images(images: list[torch.Tensor], masks: list[torch.Tensor]) -> list[torch.Tensor]:
-    """
-    Apply mask to images.
 
-    Arguments:
-        images (list[torch.Tensor]): list of images.
-        masks (list[torch.Tensor]): list of masks.
-
-    Returns:
-        masked_images (list[torch.Tensor]): list of masked images.
-    """
-
-    masked_images = []
-    for image, mask in zip(images, masks):
-        masked_images.append(image * mask)
-    return masked_images
-
-def replace_image_region(images: list[torch.Tensor], new_regions: list[torch.Tensor], region_masks: list[torch.Tensor], bounding_boxes: list[torch.Tensor]) -> list[torch.Tensor]:
+def replace_image_region(images: list[torch.Tensor], new_regions: list[torch.Tensor], bounding_boxes: list[torch.Tensor], region_masks: list[torch.Tensor], ) -> list[torch.Tensor]:
     """
     Replace regions in images with new regions.
     
     Arguments:
         images (list[torch.Tensor]): list of images.
         new_regions (list[torch.Tensor]): list of new regions.
-        region_masks (list[torch.Tensor]): list of region masks.
         bounding_boxes (list[torch.Tensor]): list of bounding boxes.
-    
+        region_masks (list[torch.Tensor]): list of region masks.
+        
     Returns:
         replaced_images (list[torch.Tensor]): list of images with replaced regions.
     """
     
-    replaced_images = []
-    for image, new_region, region_mask, (x_min, y_min, x_max, y_max) in zip(images, new_regions, region_masks, bounding_boxes):
-        replaced_img = image.clone()
+    replaced_images = []    
+    for img, new_region, (x_min, y_min, x_max, y_max), m in zip(images, new_regions, bounding_boxes, region_masks):
+        replaced_img = img.clone()
         
         # apply mask again
-        new_region = new_region * region_mask
+        new_region = new_region * m
         
         # mask out non-region area
-        replaced_img[:, x_min: x_max + 1, y_min: y_max + 1] *= ~region_mask
+        replaced_img[:, x_min: x_max + 1, y_min: y_max + 1] *= ~m
         
         # add back new region
         replaced_img[:, x_min: x_max + 1, y_min: y_max + 1] += new_region
         
         replaced_images.append(replaced_img)
-    
     return replaced_images
     
 def cal_metrics(labels: torch.Tensor, preds: torch.Tensor, wandb_log: dict[str, float], metric_prefix: str) -> None:

@@ -196,6 +196,10 @@ def rubber_sheet(irises1: list[torch.Tensor], irises2: list[torch.Tensor], resiz
         iris1, setting1 = polar_transform(iris1.cpu())
         iris2, setting2 = polar_transform(iris2.cpu())
         
+        # polar transform may introduce values outside [0, 1]
+        iris1 = np.clip(iris1, 0, 1)
+        iris2 = np.clip(iris2, 0, 1)
+        
         # resize
         iris2_resized = cv2.resize(iris2, (iris1.shape[-1], iris1.shape[-2]), interpolation = cv2.INTER_CUBIC)
         
@@ -225,7 +229,7 @@ def rubber_sheet(irises1: list[torch.Tensor], irises2: list[torch.Tensor], resiz
             width1 = right1 - left1 + 1
 
             # resize rows in iris2_resized to match the detected iris width in iris1
-            fitted = cv2.resize(iris2_resized[j][left2 : right2 + 1], (1, width1) ,interpolation = cv2.INTER_CUBIC)
+            fitted = cv2.resize(iris2_resized[j][left2 : right2 + 1], (1, width1) ,interpolation = cv2.INTER_NEAREST)
             fitted = np.reshape(fitted, (width1,))
             # assert(len(fitted) == width1)
             
@@ -234,6 +238,7 @@ def rubber_sheet(irises1: list[torch.Tensor], irises2: list[torch.Tensor], resiz
         
         # transform back to cartesian image   
         iris2_fitted = setting1.convertToCartesianImage(iris2_fitted)
+        iris2_fitted = np.clip(iris2_fitted, 0, 1)
         iris2_fitted = torch.tensor(iris2_fitted).to(device).unsqueeze(0)
         irises2_fitted.append(iris2_fitted)
         

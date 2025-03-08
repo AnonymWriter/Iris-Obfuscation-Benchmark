@@ -7,13 +7,14 @@ import torchvision.transforms.v2 as transforms
 # self-defined functions
 from models import VGG19, Classifier1, Classifier2, RITnet
 from data_preprocessing import load_data_openeds2019, OpenEDS2019Dataset
+from utils import seed, cal_metrics, cal_IoUs, prepare_dir, crop_image, replace_image_region
 from pipelines import iris_style_transfer, rubber_sheet, downsampling, gaussian_noise, gaussian_blur
-from utils import seed, cal_metrics, cal_IoUs, prepare_dir, crop_image, mask_images, replace_image_region
 
 def benchmark_openeds2019(
     args: argparse.Namespace,
     metric_prefix: str = 'test/',
-    save_dir: str = 'saved/openeds2019/',
+    save_dir: str = 'saved/openeds2019-ablation/',
+    save_period: int = 3,
     ) -> None:
     """
     Main function for benchmarks on the OpenEDS2019 dataset.
@@ -43,7 +44,7 @@ def benchmark_openeds2019(
     classifier2 = Classifier2(num_class = num_class) ; classifier2.load_state_dict(torch.load(args.classifier2_path, weights_only = True, map_location = 'cpu')) ; classifier2.to(args.device) ; classifier2.eval()
 
     # method names
-    names = ['style_transfer', 'rubber_sheet', 'downsampling', 'gaussian_noise', 'gaussian_blur']
+    names = ['gaussian_blur', 'gaussian_noise', 'downsampling', 'rubber_sheet', 'style_transfer']
             
     # metrics lists and dicts
     c_preds1_pre, c_preds2_pre, c_labelss, s_labelss, ious0_pre, ious1_pre, ious2_pre, ious3_pre, mious_pre = [], [], [], [], [], [], [], [], []
@@ -64,7 +65,9 @@ def benchmark_openeds2019(
     for batch_id, (c_images, c_labels, c_masks_gt, s_images, s_labels) in enumerate(tqdm.tqdm(dataloader)):
         with torch.no_grad():
             # save the 1st image of every batch
-            t_toPIL(c_images[0]).save(save_dir + 'batch_' + str(batch_id) + '_raw.png')
+            if batch_id % save_period == 0:
+                t_toPIL(c_images[0]).save(save_dir + 'batch_' + str(batch_id) + '_raw.png')
+                t_toPIL(s_images[0]).save(save_dir + 'batch_' + str(batch_id) + '_sty.png')
             
             batch_wandb_log = {}
             c_labelss.append(c_labels)
@@ -83,22 +86,32 @@ def benchmark_openeds2019(
             mious_pre.append(miou) ; batch_wandb_log[metric_prefix + 'pre/batch/miou'] = torch.nanmean(miou)
                         
             # collect original iris regions ans their bounding boxes
-            c_irises, c_iris_bbs, c_masks_ritnet_cropped = [], [], []
+            c_irises, c_iris_bbs, c_masks_ritnet_cropped, c_masks_glint_cropped = [], [], [], []
             for c_img, c_m_ritnet in zip(c_images, c_masks_ritnet):
                 # apply mask and compute bounding box
                 c_m_ritnet = c_m_ritnet == 2
-                c_img = c_img * c_m_ritnet
-                x_min, y_min, x_max, y_max = crop_image(c_img, return_idx = True)
+                c_img = c_img * c_m_ritnet                
+                
+                c_m_glint = (c_img <= args.glint_threshold) * c_m_ritnet
+                c_img2 = c_img * c_m_glint
+                
+                x_min, y_min, x_max, y_max = crop_image(c_img2, return_idx = True)
                 c_iris_bbs.append((x_min, y_min, x_max, y_max))
                 
                 # apply bounding box
                 c_iris = c_img[:, x_min: x_max + 1, y_min: y_max + 1]
                 c_irises.append(c_iris)
+                
+                # crop mask
                 c_m_ritnet_cropped = c_m_ritnet[..., x_min: x_max + 1, y_min: y_max + 1]
                 c_masks_ritnet_cropped.append(c_m_ritnet_cropped)
-            
+                
+                c_m_glint_cropped = c_m_glint[..., x_min: x_max + 1, y_min: y_max + 1]
+                c_masks_glint_cropped.append(c_m_glint_cropped)
+                            
             # classifications before manipulation
-            c_irises_cnn = [t_resize(iris) for iris in c_irises]
+            c_irises_cnn = [iris * m for iris, m in zip(c_irises, c_masks_glint_cropped)]
+            c_irises_cnn = [t_resize(iris) for iris in c_irises_cnn]
             c_irises_cnn = torch.stack(c_irises_cnn)
             c_irises_cnn = c_irises_cnn.repeat(1, 3, 1, 1)
             x, x_c, x_s = vgg(c_irises_cnn)
@@ -119,25 +132,39 @@ def benchmark_openeds2019(
                 s_iris = s_img * s_m_ritnet
                 s_iris = crop_image(s_iris)
                 s_irises.append(s_iris)
+            
+            # save the 1st iris of every batch
+            if batch_id % save_period == 0:
+                t_toPIL(c_irises[0]).save(save_dir + 'batch_' + str(batch_id) + '_raw_iris.png')
+                t_toPIL(s_irises[0]).save(save_dir + 'batch_' + str(batch_id) + '_sty_iris.png')
         
         # apply iris manipulation methods
-        new_c_irises_style_transfer = iris_style_transfer(c_irises, s_irises, args.c_loss_weight, args.s_loss_weight, args.nst_epochs, vgg, args.glint_threshold, args.device)
-        new_c_irises_rubber_sheet = rubber_sheet(c_irises, s_irises, args.resize_threshold)
-        new_c_irises_downsampling = downsampling(c_irises, args.downsampling_factor)
+        new_c_irises_gaussian_blur = gaussian_blur(c_irises, args.blur_sigma, None, args.glint_threshold)
         new_c_irises_gaussian_noise = gaussian_noise(c_irises, args.noise_sigma, args.glint_threshold)
-        new_c_irises_gaussian_blur = gaussian_blur(c_irises, args.blur_sigma, args.blur_kernel_size, args.glint_threshold)
+        new_c_irises_downsampling = downsampling(c_irises, args.downsampling_factor)
+        new_c_irises_rubber_sheet = rubber_sheet(c_irises, s_irises, args.resize_threshold)
+        new_c_irises_style_transfer = iris_style_transfer(c_irises, s_irises, args.c_loss_weight, args.s_loss_weight, args.nst_epochs, vgg, args.glint_threshold, args.device)
+        
         
         with torch.no_grad():
-            # mask the new irises again
-            new_c_irises_style_transfer = mask_images(new_c_irises_style_transfer, c_masks_ritnet_cropped)
-            new_c_irises_rubber_sheet = mask_images(new_c_irises_rubber_sheet, c_masks_ritnet_cropped)
-            new_c_irises_downsampling = mask_images(new_c_irises_downsampling, c_masks_ritnet_cropped)
-            new_c_irises_gaussian_noise = mask_images(new_c_irises_gaussian_noise, c_masks_ritnet_cropped)
-            new_c_irises_gaussian_blur = mask_images(new_c_irises_gaussian_blur, c_masks_ritnet_cropped)
+            irises_list = [new_c_irises_gaussian_blur, new_c_irises_gaussian_noise, new_c_irises_downsampling, new_c_irises_rubber_sheet, new_c_irises_style_transfer]
             
+            # mask the new irises again
+            for i in range(len(irises_list)):
+                irises_list[i] = [iris * m for iris, m in zip(irises_list[i], c_masks_ritnet_cropped)]
+                
             # classifications after manipulation
-            irises_list = [new_c_irises_style_transfer, new_c_irises_rubber_sheet, new_c_irises_downsampling, new_c_irises_gaussian_noise, new_c_irises_gaussian_blur]
             for new_c_irises, n in zip(irises_list, names):
+                # save the 1st iris of every batch
+                if batch_id % save_period == 0:
+                    t_toPIL(new_c_irises[0]).save(save_dir + 'batch_' + str(batch_id) + '_' + n + '_new_iris.png')
+                
+                # remove glint
+                if 'rubber' in n:
+                    new_c_irises = [iris * (iris <= args.glint_threshold) for iris in new_c_irises]
+                else:
+                    new_c_irises = [iris * m for iris, m in zip(new_c_irises, c_masks_glint_cropped)]
+                
                 # resize to 224x224
                 new_c_irises = [t_resize(iris) for iris in new_c_irises]
                 new_c_irises = torch.stack(new_c_irises)
@@ -155,16 +182,11 @@ def benchmark_openeds2019(
                 cal_metrics(s_labels.cpu(), pred2.cpu(), batch_wandb_log, metric_prefix + n + '/post/c2/mis/batch/')
                 
             # replace the old iris with the new iris
-            new_c_images_style_transfer = replace_image_region(c_images, new_c_irises_style_transfer, c_masks_ritnet_cropped, c_iris_bbs)
-            new_c_images_rubber_sheet = replace_image_region(c_images, new_c_irises_rubber_sheet, c_masks_ritnet_cropped, c_iris_bbs)
-            new_c_images_downsampling = replace_image_region(c_images, new_c_irises_downsampling, c_masks_ritnet_cropped, c_iris_bbs)
-            new_c_images_gaussian_noise = replace_image_region(c_images, new_c_irises_gaussian_noise, c_masks_ritnet_cropped, c_iris_bbs)
-            new_c_images_gaussian_blur = replace_image_region(c_images, new_c_irises_gaussian_blur, c_masks_ritnet_cropped, c_iris_bbs)
-            
-            images_list = [new_c_images_style_transfer, new_c_images_rubber_sheet, new_c_images_downsampling, new_c_images_gaussian_noise, new_c_images_gaussian_blur]
+            images_list = [replace_image_region(c_images, new_c_irises, c_iris_bbs, c_masks_ritnet_cropped) for new_c_irises in irises_list]
             for new_c_imgs, n in zip(images_list, names):
                 # save the 1st image of the batch
-                t_toPIL(new_c_imgs[0]).save(save_dir + 'batch_' + str(batch_id) + '_' + n + '_new.png')
+                if batch_id % save_period == 0:
+                    t_toPIL(new_c_imgs[0]).save(save_dir + 'batch_' + str(batch_id) + '_' + n + '_new.png')
                 
                 # IoUs after manipulation
                 c_masks_ritnet = [ritnet(c_img) for c_img in new_c_imgs]
@@ -253,7 +275,7 @@ if __name__ == '__main__':
     args.device = 'cuda:' + str(args.device) if args.device >= 0 else 'cpu'
 
     # wandb init
-    args.name = 'openeds2019 seed ' + str(args.seed)
+    args.name = 'openeds2019 ablation seed ' + str(args.seed)
     wandb.init(project = args.project, name = args.name, config = args.__dict__, anonymous = "allow")
     
     # benchmark main function

@@ -1,18 +1,17 @@
-# repo title
+# Iris Obfuscation Benchmark
 
-> **paper title.**
-> abstract.
+> **Trade-offs in Privacy-Preserving Eye Tracking through Iris Obfuscation: A Benchmarking Study**
+
+> Recent developments in hardware, computer graphics, and AI may soon enable AR/VR head-mounted displays (HMDs) to become everyday devices like smartphones and tablets. Eye trackers within HMDs provide a special opportunity for such setups as it is possible to facilitate gaze-based research and interaction. However, estimating users' gaze information often requires raw eye images and videos that contain iris textures, which are considered as a gold standard biometric for user authentication and this raises privacy concerns. Previous research in the eye-tracking community focused on obfuscating iris textures while keeping utility tasks such as eye segmentation and gaze estimation accurate. Despite these attempts, there is no comprehensive benchmark that evaluates state-of-the-art approaches. Considering all, in this paper, we benchmark blurring, noising, downsampling, rubber sheet model, and iris style transfer to obfuscate users in the data to protect their privacy, and compare their impact on image quality, privacy, utility, and risk of imposter attack on two datasets. We treat eye segmentation and gaze estimation as utility tasks, and reduction in iris recognition accuracy as measure of privacy protection, and false acceptance rate to estimate risk of attack. Our experiments show that canonical image processing methods like blurring and noising cause marginal impact on all deep learning-based tasks. While downsampling, rubber sheet model, and iris style transfer are effective in hiding user identifiers, iris style transfer, with higher computation cost, outperforms others in both utility tasks, and is more resilient against spoof attack than rubber sheet model. Our analyses indicate that there is no universal, optimal approach to balance privacy, utility, and computation burden. Therefore, we recommend practitioners consider the strengths and weaknesses of each approach, and possible combinations of those to find an optimal privacy-utility trade-off.
 
 This repository is anonymized for review.
 
 ## 💁 Usage
 1. Contact Meta for the access to the OpenEDS2019 and OpenEDS2020 datasets.
 
-2. Create conda environment with `conda env create -f environment.yml` and then activate the environment with `conda activate imb`.
+2. Create conda environment with `conda env create -f environment.yml` and then activate the environment with `conda activate iob`.
 
-3. For an interactive play with general neural style transfer and iris style transfer, try `nst.ipynb` and `iris_nst.ipynb`.
-
-    For training iris classifiers, gaze estimators, and reproducing our experiment results, run `experiments.sh`.
+3. For training iris classifiers, gaze estimators, and reproducing our benchmark results, run `experiments.sh`.
 
 ## 🔧 Environment
 Important libraries and their versions by **March 3rd, 2025**:
